@@ -3,7 +3,7 @@ import time
 import argparse
 from typing import Optional
 from playwright.sync_api import sync_playwright, Page
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict
 import pandas as pd
 import platform
 import json
@@ -18,8 +18,9 @@ class BusinessDetails:
     place_type: str = ""
     rating: Optional[float] = None
     reviews_count: Optional[int] = None
-    opens_at: str = ""
-    hours: str = ""
+    opening_status: str = ""
+    hours_today: str = ""
+    full_hours: str = ""
     price_range: str = ""
     plus_code: str = ""
     store_shopping: str = "No"
@@ -27,6 +28,8 @@ class BusinessDetails:
     delivery: str = "No"
     dine_in: str = "No"
     introduction: str = ""
+    latitude: str = ""
+    longitude: str = ""
     url: str = ""
 
 def setup_logging():
@@ -34,25 +37,6 @@ def setup_logging():
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
     )
-
-def extract_text(page: Page, xpath: str) -> str:
-    try:
-        loc = page.locator(xpath)
-        if loc.count() > 0:
-            return loc.first.inner_text().strip()
-    except:
-        pass
-    return ""
-
-def extract_attribute(page: Page, xpath: str, attr: str) -> str:
-    try:
-        loc = page.locator(xpath)
-        if loc.count() > 0:
-            val = loc.first.get_attribute(attr)
-            return val.strip() if val else ""
-    except:
-        pass
-    return ""
 
 def scrape_business_from_url(url: str) -> BusinessDetails:
     """Scrape all details from a single Google Maps business URL"""
@@ -72,102 +56,166 @@ def scrape_business_from_url(url: str) -> BusinessDetails:
         try:
             logging.info(f"Opening: {url}")
             page.goto(url, timeout=60000)
-            time.sleep(4)
+            time.sleep(5)
 
             # Handle GDPR/consent popup
             if 'consent.google.com' in page.url:
                 try:
                     page.locator('form button').first.click()
-                    time.sleep(2)
+                    time.sleep(3)
                 except:
                     pass
 
             # Wait for business name to load
             try:
-                page.wait_for_selector('//h1[@class="DUwDvf lfPIob"]', timeout=15000)
+                page.wait_for_selector('.DUwDvf', timeout=15000)
             except:
-                try:
-                    page.wait_for_selector('.DUwDvf', timeout=10000)
-                except:
-                    pass
+                pass
 
-            time.sleep(2)
+            time.sleep(3)
 
-            # Business Name
-            business.name = extract_text(page, '//h1[@class="DUwDvf lfPIob"]')
-            if not business.name:
-                business.name = extract_text(page, '.DUwDvf')
-
-            # Address
-            business.address = extract_text(page, '//button[@data-item-id="address"]//div[contains(@class, "fontBodyMedium")]')
-
-            # Phone
-            business.phone_number = extract_text(page, '//button[contains(@data-item-id, "phone:tel:")]//div[contains(@class, "fontBodyMedium")]')
-
-            # Website
-            business.website = extract_text(page, '//a[@data-item-id="authority"]//div[contains(@class, "fontBodyMedium")]')
-            if not business.website:
-                # Try getting href
-                href = extract_attribute(page, '//a[@data-item-id="authority"]', 'href')
-                if href:
-                    business.website = href
-            business.has_website = "Yes" if business.website else "No"
-
-            # Category/Place Type
-            business.place_type = extract_text(page, '//div[@class="LBgpqf"]//button[@class="DkEaL "]')
-
-            # Rating
-            rating_text = extract_text(page, '//div[@class="TIHn2 "]//div[@class="fontBodyMedium dmRWX"]//div//span[@aria-hidden]')
-            if rating_text:
-                try:
-                    business.rating = float(rating_text.replace(',', '.').strip())
-                except:
-                    pass
-
-            # Reviews Count
-            reviews_text = extract_text(page, '//div[@class="TIHn2 "]//div[@class="fontBodyMedium dmRWX"]//div//span//span//span[@aria-label]')
-            if reviews_text:
-                try:
-                    temp = reviews_text.replace('\xa0', '').replace('(', '').replace(')', '').replace(',', '')
-                    business.reviews_count = int(temp)
-                except:
-                    pass
-
-            # Opening Hours
-            opens_at_text = extract_text(page, '//button[contains(@data-item-id, "oh")]//div[contains(@class, "fontBodyMedium")]')
-            if opens_at_text:
-                parts = opens_at_text.split('⋅')
-                if len(parts) > 1:
-                    business.opens_at = parts[0].strip()
-                    business.hours = parts[1].strip().replace("\u202f", "")
-                else:
-                    business.opens_at = opens_at_text.replace("\u202f", "")
-
-            # Price Range
-            business.price_range = extract_text(page, '//span[contains(@aria-label, "Price")]')
-
-            # Plus Code
-            business.plus_code = extract_text(page, '//button[@data-item-id="oloc"]//div[contains(@class, "fontBodyMedium")]')
-
-            # Service options (dine-in, delivery, pickup, etc.)
+            # ===== BUSINESS NAME =====
             try:
-                service_options = page.locator('//div[@class="LTs0Rc"]')
-                count = service_options.count()
-                for i in range(count):
-                    text = service_options.nth(i).inner_text().lower()
-                    if 'dine' in text:
+                name_loc = page.locator('.DUwDvf')
+                if name_loc.count() > 0:
+                    business.name = name_loc.first.inner_text().strip()
+            except:
+                pass
+
+            # ===== CATEGORY / PLACE TYPE =====
+            try:
+                cat_loc = page.locator('button.DkEaL')
+                if cat_loc.count() > 0:
+                    business.place_type = cat_loc.first.inner_text().strip()
+            except:
+                pass
+
+            # ===== RATING =====
+            try:
+                rating_loc = page.locator('.F7nice span[aria-hidden="true"]')
+                if rating_loc.count() > 0:
+                    text = rating_loc.first.inner_text().strip()
+                    business.rating = float(text.replace(',', '.'))
+            except:
+                pass
+
+            # ===== REVIEWS COUNT =====
+            try:
+                reviews_loc = page.locator('.F7nice span[aria-label]')
+                if reviews_loc.count() > 0:
+                    text = reviews_loc.first.get_attribute('aria-label')
+                    if text:
+                        num = text.replace(',', '').replace('.', '')
+                        import re
+                        match = re.search(r'(\d+)', num)
+                        if match:
+                            business.reviews_count = int(match.group(1))
+            except:
+                pass
+
+            # ===== ALL INFO ITEMS (address, phone, website, hours, plus code) =====
+            # These are in the info section with data-item-id attributes
+            try:
+                # Address
+                addr_loc = page.locator('button[data-item-id="address"]')
+                if addr_loc.count() > 0:
+                    business.address = addr_loc.first.get_attribute('aria-label') or ""
+                    business.address = business.address.replace("Address: ", "").strip()
+            except:
+                pass
+
+            try:
+                # Phone
+                phone_loc = page.locator('button[data-item-id*="phone:tel:"]')
+                if phone_loc.count() > 0:
+                    business.phone_number = phone_loc.first.get_attribute('aria-label') or ""
+                    business.phone_number = business.phone_number.replace("Phone: ", "").strip()
+            except:
+                pass
+
+            try:
+                # Website
+                web_loc = page.locator('a[data-item-id="authority"]')
+                if web_loc.count() > 0:
+                    business.website = web_loc.first.get_attribute('aria-label') or ""
+                    business.website = business.website.replace("Website: ", "").strip()
+                    if not business.website:
+                        business.website = web_loc.first.get_attribute('href') or ""
+                business.has_website = "Yes" if business.website else "No"
+            except:
+                pass
+
+            try:
+                # Plus Code
+                plus_loc = page.locator('button[data-item-id="oloc"]')
+                if plus_loc.count() > 0:
+                    business.plus_code = plus_loc.first.get_attribute('aria-label') or ""
+                    business.plus_code = business.plus_code.replace("Plus code: ", "").strip()
+            except:
+                pass
+
+            # ===== OPENING HOURS =====
+            try:
+                hours_loc = page.locator('button[data-item-id*="oh"]')
+                if hours_loc.count() > 0:
+                    hours_label = hours_loc.first.get_attribute('aria-label') or ""
+                    business.full_hours = hours_label.replace("Hours", "").strip()
+
+                    # Get the visible text for status
+                    hours_text_loc = hours_loc.first.locator('.fontBodyMedium')
+                    if hours_text_loc.count() > 0:
+                        visible_text = hours_text_loc.first.inner_text().strip()
+                        parts = visible_text.split('⋅')
+                        if len(parts) >= 2:
+                            business.opening_status = parts[0].strip()
+                            business.hours_today = parts[1].strip().replace("\u202f", "")
+                        else:
+                            business.opening_status = visible_text.replace("\u202f", "")
+            except:
+                pass
+
+            # ===== PRICE RANGE =====
+            try:
+                price_loc = page.locator('span[aria-label*="Price"]')
+                if price_loc.count() > 0:
+                    business.price_range = price_loc.first.get_attribute('aria-label') or ""
+            except:
+                pass
+
+            # ===== SERVICE OPTIONS =====
+            try:
+                services = page.locator('.LTs0Rc')
+                for i in range(services.count()):
+                    text = services.nth(i).inner_text().lower()
+                    if 'dine' in text or 'dine-in' in text:
                         business.dine_in = "Yes"
                     if 'delivery' in text:
                         business.delivery = "Yes"
-                    if 'pickup' in text:
+                    if 'pickup' in text or 'pick-up' in text:
                         business.in_store_pickup = "Yes"
-                    if 'shop' in text:
+                    if 'shop' in text or 'in-store' in text:
                         business.store_shopping = "Yes"
             except:
                 pass
 
-            # Introduction/About
-            business.introduction = extract_text(page, '//div[@class="WeS02d fontBodyMedium"]//div[@class="PYvSYb "]')
+            # ===== INTRODUCTION / ABOUT =====
+            try:
+                intro_loc = page.locator('.WeS02d.fontBodyMedium .PYvSYb')
+                if intro_loc.count() > 0:
+                    business.introduction = intro_loc.first.inner_text().strip()
+            except:
+                pass
+
+            # ===== LATITUDE & LONGITUDE (from URL) =====
+            try:
+                current_url = page.url
+                import re
+                coords = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', current_url)
+                if coords:
+                    business.latitude = coords.group(1)
+                    business.longitude = coords.group(2)
+            except:
+                pass
 
             logging.info(f"Successfully scraped: {business.name}")
 
@@ -185,7 +233,7 @@ def scrape_multiple_urls(urls: list, output_path: str = "businesses.csv", append
         try:
             biz = scrape_business_from_url(url)
             businesses.append(biz)
-            time.sleep(2)  # Delay between scrapes
+            time.sleep(2)
         except Exception as e:
             logging.warning(f"Failed to scrape {url}: {e}")
 
@@ -198,13 +246,11 @@ def save_to_csv(businesses, output_path: str = "businesses.csv", append: bool = 
         logging.warning("No data to save.")
         return
 
-    if isinstance(businesses[0], BusinessDetails):
-        df = pd.DataFrame([asdict(b) for b in businesses])
-    else:
-        df = pd.DataFrame(businesses)
+    df = pd.DataFrame([asdict(b) for b in businesses])
 
     if not df.empty:
-        file_exists = pd.io.common.file_exists(output_path)
+        import os
+        file_exists = os.path.isfile(output_path)
         mode = "a" if append else "w"
         header = not (append and file_exists)
         df.to_csv(output_path, index=False, mode=mode, header=header)
@@ -219,17 +265,34 @@ def save_to_csv(businesses, output_path: str = "businesses.csv", append: bool = 
         print(f"  With website:             {has_website}")
         print(f"  WITHOUT website (LEADS):  {no_website}")
         print(f"  Output file:              {output_path}")
-        print(f"="*60 + "\n")
+        print(f"="*60)
 
-        # Print details
+        # Print all details for each business
         for _, row in df.iterrows():
-            status = "NO WEBSITE" if row['has_website'] == 'No' else "has website"
-            print(f"  {row['name']} | {row['phone_number']} | {status}")
+            print(f"\n  {'='*56}")
+            print(f"  {row['name']}")
+            print(f"  {'='*56}")
+            print(f"  Category:     {row['place_type']}")
+            print(f"  Address:      {row['address']}")
+            print(f"  Phone:        {row['phone_number']}")
+            print(f"  Website:      {row['website'] if row['website'] else 'NONE - POTENTIAL LEAD!'}")
+            print(f"  Rating:       {row['rating']}/5 ({row['reviews_count']} reviews)")
+            print(f"  Status:       {row['opening_status']}")
+            print(f"  Hours Today:  {row['hours_today']}")
+            print(f"  Full Hours:   {row['full_hours']}")
+            print(f"  Plus Code:    {row['plus_code']}")
+            print(f"  Dine-in:      {row['dine_in']}")
+            print(f"  Delivery:     {row['delivery']}")
+            print(f"  Pickup:       {row['in_store_pickup']}")
+            print(f"  Shopping:     {row['store_shopping']}")
+            print(f"  About:        {row['introduction']}")
+            print(f"  Coordinates:  {row['latitude']}, {row['longitude']}")
+            print(f"  URL:          {row['url']}")
         print()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Google Maps Business Scraper - Get full details from URL(s)")
+    parser = argparse.ArgumentParser(description="Google Maps Business Scraper - Get FULL details from URL(s)")
     parser.add_argument("-u", "--url", type=str, help="Single Google Maps business URL")
     parser.add_argument("-f", "--file", type=str, help="Text file with Google Maps URLs (one per line)")
     parser.add_argument("-o", "--output", type=str, default="businesses.csv", help="Output CSV file (default: businesses.csv)")
@@ -245,7 +308,6 @@ def main():
     print(f"="*60)
 
     if args.url:
-        # Single URL
         print(f"  URL: {args.url[:55]}...")
         print(f"  Output: {args.output}")
         print(f"="*60 + "\n")
@@ -255,10 +317,9 @@ def main():
 
         if args.json:
             print("\nJSON Output:")
-            print(json.dumps(asdict(business), indent=2))
+            print(json.dumps(asdict(business), indent=2, ensure_ascii=False))
 
     elif args.file:
-        # Multiple URLs from file
         with open(args.file, 'r') as f:
             urls = [line.strip() for line in f if line.strip() and line.strip().startswith('http')]
         print(f"  URLs file: {args.file}")
