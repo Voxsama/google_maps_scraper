@@ -70,6 +70,7 @@ export async function scrapeGoogleMaps(
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
+      "--disable-gpu",
     ],
   });
 
@@ -77,7 +78,8 @@ export async function scrapeGoogleMaps(
     const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
       userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      locale: "en-US",
     });
 
     const page = await context.newPage();
@@ -85,8 +87,7 @@ export async function scrapeGoogleMaps(
     // Navigate to Google Maps with the search query
     const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    // Wait a bit for dynamic content to load
-    await randomDelay(3000, 5000);
+    await randomDelay(4000, 6000);
 
     // Handle cookie consent popup (non-fatal)
     try {
@@ -121,9 +122,10 @@ export async function scrapeGoogleMaps(
       // Results may have loaded with a different structure
     }
 
-    // Scroll the results panel to load more results
+    // Scroll the results panel multiple times to load more results (up to ~60+)
     const feedSelector = '[role="feed"]';
-    for (let i = 0; i < 4; i++) {
+    let previousCount = 0;
+    for (let i = 0; i < 10; i++) {
       try {
         await page.evaluate((selector) => {
           const feed = document.querySelector(selector);
@@ -134,14 +136,27 @@ export async function scrapeGoogleMaps(
       } catch {
         // Scroll failed, continue
       }
-      await randomDelay(1000, 3000);
+      await randomDelay(1500, 3000);
+
+      // Check if we've reached the end or loaded enough
+      try {
+        const endOfList = await page.$('span.HlvSq');
+        if (endOfList) break; // "You've reached the end of the list"
+      } catch {
+        // Continue scrolling
+      }
+
+      // Check how many results we have now
+      const currentCount = await page.$$eval('.hfpxzc', els => els.length).catch(() => 0);
+      if (currentCount === previousCount && i > 3) break; // No new results loading
+      previousCount = currentCount;
     }
 
     // Collect all result items
     const resultSelectors = [
+      ".hfpxzc",
       '[role="feed"] > div > div > a',
       ".Nv2PK a",
-      ".hfpxzc",
     ];
 
     const resultElements: string[] = [];
@@ -149,10 +164,9 @@ export async function scrapeGoogleMaps(
       try {
         const elements = await page.$$(selector);
         if (elements.length > 0) {
-          // Store aria-labels or hrefs to re-find them after clicking
           for (const el of elements) {
             const label = await el.getAttribute("aria-label");
-            if (label) {
+            if (label && !resultElements.includes(label)) {
               resultElements.push(label);
             }
           }
@@ -163,13 +177,11 @@ export async function scrapeGoogleMaps(
       }
     }
 
-    // Limit to 20 results
-    const maxResults = Math.min(resultElements.length, 20);
+    // Process up to 60 results
+    const maxResults = Math.min(resultElements.length, 60);
 
     for (let i = 0; i < maxResults; i++) {
       try {
-        // Re-find the element by aria-label using Playwright's getByRole
-        // which safely handles special characters (], \, quotes, etc.)
         const ariaLabel = resultElements[i];
         const element = page.getByRole("link", { name: ariaLabel, exact: true }).first();
 
@@ -177,29 +189,38 @@ export async function scrapeGoogleMaps(
 
         // Click the result to open its detail panel
         await element.click();
-        await randomDelay(500, 2000);
+        await randomDelay(1500, 3000);
+
+        // Wait for the detail panel to load
+        try {
+          await page.waitForSelector('.DUwDvf, h1', { timeout: 5000 });
+        } catch {
+          // Panel may not have loaded properly
+        }
 
         // Extract business details from the detail panel
         const businessName = await trySelector(page, [
-          ".DUwDvf",
           "h1.DUwDvf",
+          ".DUwDvf",
           '[data-attrid="title"]',
           "h1",
         ]);
 
         const address = await trySelector(page, [
-          ".rogA2c .Io6YTe",
+          'button[data-item-id="address"] .Io6YTe',
           'button[data-item-id="address"]',
+          ".rogA2c .Io6YTe",
           '[data-item-id="address"]',
         ]);
 
-        // Phone - try selectors and look for phone pattern
+        // Phone
         let phone = await trySelector(page, [
+          'button[data-item-id^="phone"] .Io6YTe',
           'button[data-item-id^="phone"]',
+          '[data-item-id^="phone"] .Io6YTe',
           '[data-item-id^="phone"]',
         ]);
         if (!phone) {
-          // Try to find phone in generic info elements
           const infoElements = await page.$$(".rogA2c .Io6YTe");
           for (const el of infoElements) {
             const text = await el.textContent();
@@ -236,27 +257,64 @@ export async function scrapeGoogleMaps(
           }
         }
 
-        // Website
-        let website =
-          (await tryGetAttribute(
-            page,
-            [
-              'a[data-item-id="authority"]',
-              'a[aria-label*="website"]',
-            ],
-            "href"
-          )) || "";
+        // Website detection - be thorough
+        let website = "";
 
-        // Fallback: find a link that is not a Google link
+        // Method 1: Look for the website button/link specifically
+        const websiteHref = await tryGetAttribute(
+          page,
+          [
+            'a[data-item-id="authority"]',
+            'a[aria-label*="ebsite"]',
+            'a[aria-label*="Website"]',
+          ],
+          "href"
+        );
+        if (websiteHref) {
+          website = websiteHref;
+        }
+
+        // Method 2: Check for website text in the action buttons area
         if (!website) {
           try {
-            const links = await page.$$('a[href^="http"]:not([href*="google"])');
+            const actionButtons = await page.$$('.RcCsl a, .m6QErb a');
+            for (const btn of actionButtons) {
+              const ariaLbl = await btn.getAttribute("aria-label");
+              const href = await btn.getAttribute("href");
+              if (
+                ariaLbl &&
+                (ariaLbl.toLowerCase().includes("website") ||
+                  ariaLbl.toLowerCase().includes("web site")) &&
+                href
+              ) {
+                website = href;
+                break;
+              }
+            }
+          } catch {
+            // No website button found
+          }
+        }
+
+        // Method 3: Look for external links that aren't Google
+        if (!website) {
+          try {
+            const links = await page.$$('a[href^="http"]');
             for (const link of links) {
               const href = await link.getAttribute("href");
+              const ariaLbl = await link.getAttribute("aria-label");
               if (
                 href &&
                 !href.includes("google.com") &&
-                !href.includes("googleapis.com")
+                !href.includes("googleapis.com") &&
+                !href.includes("gstatic.com") &&
+                !href.includes("youtube.com") &&
+                !href.includes("facebook.com") &&
+                !href.includes("instagram.com") &&
+                !href.includes("twitter.com") &&
+                !href.includes("yelp.com") &&
+                ariaLbl &&
+                ariaLbl.toLowerCase().includes("website")
               ) {
                 website = href;
                 break;
@@ -269,19 +327,22 @@ export async function scrapeGoogleMaps(
 
         const hasWebsite = website ? 1 : 0;
 
-        results.push({
-          business_name: businessName || "",
-          address: address || "",
-          phone: phone || "",
-          category: category || "",
-          rating,
-          review_count: reviewCount,
-          website: website || "",
-          has_website: hasWebsite,
-        });
+        // Only add if we got at least a business name
+        if (businessName) {
+          results.push({
+            business_name: businessName,
+            address: address || "",
+            phone: phone || "",
+            category: category || "",
+            rating,
+            review_count: reviewCount,
+            website: website || "",
+            has_website: hasWebsite,
+          });
+        }
 
         // Random delay before next business
-        await randomDelay(500, 1500);
+        await randomDelay(800, 1800);
       } catch {
         // Skip this result and continue with next
         continue;

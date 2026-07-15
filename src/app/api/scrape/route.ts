@@ -3,7 +3,7 @@ import { scrapeGoogleMaps } from "@/lib/scraper";
 import { insertLead } from "@/lib/database";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 // Simple in-memory concurrency gate to prevent multiple simultaneous scrape requests
 const globalForScrape = globalThis as unknown as { __scrapeInProgress: boolean };
