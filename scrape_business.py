@@ -309,46 +309,94 @@ def scrape_business_from_url(url: str, scrape_reviews: bool = True, max_reviews:
 
             # ===== PHOTOS =====
             try:
-                # Click on the photos/images section
+                # Click on the photos/images section to open the gallery
                 photo_tab = page.locator('button[aria-label*="Photo"], button[aria-label*="photo"], button.aoRNLd')
                 if photo_tab.count() > 0:
                     photo_tab.first.click()
                     time.sleep(3)
                 else:
-                    # Try clicking the main image
-                    main_img = page.locator('.ZKbJif, .p-ogBf, .aoRNLd')
+                    # Try clicking the main image/cover photo
+                    main_img = page.locator('.ZKbJif, .p-ogBf, .aoRNLd, .RZ66Rb img')
                     if main_img.count() > 0:
                         main_img.first.click()
                         time.sleep(3)
 
-                # Collect photo URLs
-                photo_elements = page.locator('a[data-photo-index] img, .U39Pmb img, div[style*="background-image"]')
-                if photo_elements.count() > 0:
-                    for i in range(min(photo_elements.count(), max_photos)):
-                        try:
-                            src = photo_elements.nth(i).get_attribute('src')
-                            if src and 'googleusercontent' in src:
-                                # Get higher res version
-                                src = re.sub(r'=w\d+-h\d+', '=w800-h600', src)
-                                business.photo_urls.append(src)
-                        except:
-                            pass
+                # Scroll the photo gallery to load more photos
+                for scroll_i in range(max_photos // 5 + 2):
+                    try:
+                        page.evaluate("""
+                            () => {
+                                const gallery = document.querySelector('.m6QErb.DxyBCb.kA9KIf.dS8AEf') ||
+                                                document.querySelector('.m6QErb.DxyBCb') ||
+                                                document.querySelector('.lXJj5c.Hk4XGb') ||
+                                                document.querySelector('[role="main"] .m6QErb');
+                                if (gallery) {
+                                    gallery.scrollTop = gallery.scrollHeight;
+                                }
+                            }
+                        """)
+                    except:
+                        pass
+                    time.sleep(1.5)
 
-                # Also try background-image style
-                if not business.photo_urls:
+                # Collect photo URLs from multiple possible selectors
+                collected_urls = set()
+
+                # Method 1: img tags with src containing googleusercontent
+                img_elements = page.locator('img[src*="googleusercontent"]')
+                for i in range(img_elements.count()):
+                    try:
+                        src = img_elements.nth(i).get_attribute('src')
+                        if src:
+                            if src.startswith('//'):
+                                src = 'https:' + src
+                            # Get higher resolution
+                            src = re.sub(r'=w\d+-h\d+.*', '=w800-h600-k-no', src)
+                            src = re.sub(r'=s\d+.*', '=w800-h600-k-no', src)
+                            collected_urls.add(src)
+                            if len(collected_urls) >= max_photos:
+                                break
+                    except:
+                        pass
+
+                # Method 2: divs with background-image
+                if len(collected_urls) < max_photos:
                     bg_elements = page.locator('[style*="background-image"]')
-                    for i in range(min(bg_elements.count(), max_photos)):
+                    for i in range(bg_elements.count()):
                         try:
                             style = bg_elements.nth(i).get_attribute('style')
-                            if style:
+                            if style and 'googleusercontent' in style:
                                 url_match = re.search(r'url\(["\']?(.*?)["\']?\)', style)
-                                if url_match and 'googleusercontent' in url_match.group(1):
+                                if url_match:
                                     photo_url = url_match.group(1)
-                                    photo_url = re.sub(r'=w\d+-h\d+', '=w800-h600', photo_url)
-                                    business.photo_urls.append(photo_url)
+                                    if photo_url.startswith('//'):
+                                        photo_url = 'https:' + photo_url
+                                    photo_url = re.sub(r'=w\d+-h\d+.*', '=w800-h600-k-no', photo_url)
+                                    photo_url = re.sub(r'=s\d+.*', '=w800-h600-k-no', photo_url)
+                                    collected_urls.add(photo_url)
+                                    if len(collected_urls) >= max_photos:
+                                        break
                         except:
                             pass
 
+                # Method 3: a tags with photo links
+                if len(collected_urls) < max_photos:
+                    photo_links = page.locator('a[data-photo-index] img, .U39Pmb img')
+                    for i in range(photo_links.count()):
+                        try:
+                            src = photo_links.nth(i).get_attribute('src')
+                            if src and 'googleusercontent' in src:
+                                if src.startswith('//'):
+                                    src = 'https:' + src
+                                src = re.sub(r'=w\d+-h\d+.*', '=w800-h600-k-no', src)
+                                src = re.sub(r'=s\d+.*', '=w800-h600-k-no', src)
+                                collected_urls.add(src)
+                                if len(collected_urls) >= max_photos:
+                                    break
+                        except:
+                            pass
+
+                business.photo_urls = list(collected_urls)[:max_photos]
                 business.photo_count = len(business.photo_urls)
                 logging.info(f"Found {business.photo_count} photos")
 
