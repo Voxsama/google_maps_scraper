@@ -72,6 +72,9 @@ def download_photos(photo_urls: List[str], business_name: str, output_dir: str =
     downloaded = 0
     for i, url in enumerate(photo_urls):
         try:
+            # Fix URLs that start with // (missing scheme)
+            if url.startswith('//'):
+                url = 'https:' + url
             response = requests.get(url, timeout=15)
             if response.status_code == 200:
                 ext = '.jpg'
@@ -482,9 +485,24 @@ def save_output(business: BusinessDetails, output_path: str, append: bool = Fals
             json.dump(data, f, indent=2, ensure_ascii=False)
         logging.info(f"Saved JSON to {json_path}")
 
-    # For CSV - flatten the data
-    csv_data = {k: v for k, v in data.items() if k not in ['photo_urls', 'reviews']}
-    csv_data['photo_urls'] = ' | '.join(data['photo_urls']) if data['photo_urls'] else ""
+    # For CSV - flatten the data (remove nested lists)
+    csv_data = {}
+    for k, v in data.items():
+        if k == 'photo_urls':
+            # Fix URLs and join
+            fixed_urls = []
+            for u in v:
+                if u.startswith('//'):
+                    u = 'https:' + u
+                fixed_urls.append(u)
+            csv_data['photo_urls'] = ' | '.join(fixed_urls) if fixed_urls else ""
+        elif k == 'reviews':
+            # Skip - reviews go to separate file
+            continue
+        elif isinstance(v, list):
+            csv_data[k] = str(v)
+        else:
+            csv_data[k] = v
     
     # Add review summary
     if data['reviews']:
@@ -493,22 +511,46 @@ def save_output(business: BusinessDetails, output_path: str, append: bool = Fals
         for i, rev in enumerate(data['reviews'][:5]):
             csv_data[f'review_{i+1}_name'] = rev['reviewer_name']
             csv_data[f'review_{i+1}_rating'] = rev['rating']
-            csv_data[f'review_{i+1}_text'] = rev['review_text']
+            csv_data[f'review_{i+1}_text'] = rev['review_text'][:200] if rev['review_text'] else ""
             csv_data[f'review_{i+1}_time'] = rev['time_posted']
 
-    df = pd.DataFrame([csv_data])
-    file_exists = os.path.isfile(output_path)
-    mode = "a" if append else "w"
-    header = not (append and file_exists)
-    df.to_csv(output_path, index=False, mode=mode, header=header)
+    try:
+        df = pd.DataFrame([csv_data])
+        file_exists = os.path.isfile(output_path)
+        mode = "a" if append else "w"
+        header = not (append and file_exists)
+        df.to_csv(output_path, index=False, mode=mode, header=header, encoding='utf-8-sig')
+        logging.info(f"Saved business details to {output_path}")
+    except Exception as e:
+        logging.warning(f"CSV save error: {e}. Saving as JSON instead.")
+        fallback_path = output_path.replace('.csv', '.json')
+        with open(fallback_path, 'w', encoding='utf-8') as f:
+            json.dump(csv_data, f, indent=2, ensure_ascii=False)
+        logging.info(f"Saved to {fallback_path} instead")
 
     # Also save all reviews to separate CSV
     if data['reviews']:
-        reviews_path = output_path.replace('.csv', '_reviews.csv')
-        rev_df = pd.DataFrame(data['reviews'])
-        rev_df.insert(0, 'business_name', business.name)
-        rev_df.to_csv(reviews_path, index=False, mode=mode, header=header)
-        logging.info(f"Saved {len(data['reviews'])} reviews to {reviews_path}")
+        try:
+            reviews_path = output_path.replace('.csv', '_reviews.csv')
+            rev_data = []
+            for rev in data['reviews']:
+                rev_row = {
+                    'business_name': business.name,
+                    'reviewer_name': rev['reviewer_name'],
+                    'rating': rev['rating'],
+                    'review_text': rev['review_text'],
+                    'time_posted': rev['time_posted'],
+                    'reviewer_photo': rev['reviewer_photo']
+                }
+                rev_data.append(rev_row)
+            rev_df = pd.DataFrame(rev_data)
+            file_exists = os.path.isfile(reviews_path)
+            mode = "a" if append else "w"
+            header = not (append and file_exists)
+            rev_df.to_csv(reviews_path, index=False, mode=mode, header=header, encoding='utf-8-sig')
+            logging.info(f"Saved {len(rev_data)} reviews to {reviews_path}")
+        except Exception as e:
+            logging.warning(f"Review CSV save error: {e}")
 
 
 def print_details(business: BusinessDetails):
