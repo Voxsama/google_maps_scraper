@@ -77,6 +77,40 @@ Run `npx playwright install chromium` to download the browser.
 ### Scraping is slow
 This is normal. The scraper adds random delays between actions to avoid detection. Each search takes 30-90 seconds depending on how many results are found.
 
+## Python CLI Scraper (Alternative)
+
+A simpler command-line version that opens a visible Chrome browser.
+
+### Setup (one time):
+```bash
+pip install -r requirements.txt
+playwright install
+```
+
+### Scrape businesses:
+```bash
+# Scrape 50 businesses
+python main.py -s "plumbers in Austin TX" -t 50
+
+# Only get businesses WITHOUT a website (your leads!)
+python main.py -s "restaurants in Jaipur" -t 50 --no-website
+
+# Append to existing file
+python main.py -s "gyms in Delhi" -t 30 --no-website -o leads.csv --append
+```
+
+### Scrape reviews from a specific business:
+```bash
+# Scrape 50 reviews from a business URL
+python scrape_reviews.py -u "https://www.google.com/maps/place/BUSINESS_URL" -t 50
+
+# Scrape 100 reviews and save as Excel
+python scrape_reviews.py -u "https://www.google.com/maps/place/BUSINESS_URL" -t 100 --excel
+
+# Scrape reviews and save to specific file
+python scrape_reviews.py -u "https://www.google.com/maps/place/BUSINESS_URL" -t 30 -o my_reviews.csv
+```
+
 ## License
 
 MIT
