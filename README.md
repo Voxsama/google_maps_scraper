@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LeadScraper - Google Maps Business Scraper
 
-## Getting Started
+Find local businesses on Google Maps that **don't have a website** — perfect for offering your web development services.
 
-First, run the development server:
+## Features
+
+- Search Google Maps with any query (e.g. "plumbers in Austin TX")
+- Headless browser scraping with anti-detection measures
+- Automatically identifies businesses without websites
+- SQLite database for storing leads locally
+- Export leads to CSV
+- Dashboard with stats overview
+- Dark theme professional UI
+- Table and card view modes
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Install Playwright browsers (IMPORTANT!)
+
+```bash
+npx playwright install chromium
+```
+
+> If you get permission errors on Linux, run:
+> ```bash
+> npx playwright install --with-deps chromium
+> ```
+
+### 3. Run the app
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How to Use
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Go to the **Search** page
+2. Enter a query like "restaurants in Dallas TX" or "dentists in Miami FL"
+3. Click **Search** — the scraper will open Google Maps in a headless browser and extract business details
+4. View results on the **Results** page — businesses without websites are highlighted
+5. Toggle the **"No Website Only"** filter to see just your opportunities
+6. Click **Export CSV** to download your leads
 
-## Learn More
+## Pages
 
-To learn more about Next.js, take a look at the following resources:
+| Page | URL | Description |
+|------|-----|-------------|
+| Search | `/search` | Enter queries to scrape Google Maps |
+| Results | `/results` | View all scraped leads (table/card view, filters, CSV export) |
+| Dashboard | `/dashboard` | Stats overview and recent searches |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tech Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Next.js 14** (App Router) with TypeScript
+- **Tailwind CSS** for styling (dark theme)
+- **Playwright** for headless browser scraping
+- **better-sqlite3** for local database storage
 
-## Deploy on Vercel
+## Troubleshooting
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### "Executable doesn't exist" error
+Run `npx playwright install chromium` to download the browser.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### "No results found"
+- Google may be blocking the request. Wait a few minutes and try again.
+- Use specific queries with location (e.g. "plumbers in Austin TX" not just "plumbers")
+- Google Maps HTML changes frequently — selectors may need updating.
+
+### Scraping is slow
+This is normal. The scraper adds random delays between actions to avoid detection. Each search takes 30-90 seconds depending on how many results are found.
+
+## License
+
+MIT
