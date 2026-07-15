@@ -84,7 +84,9 @@ export async function scrapeGoogleMaps(
 
     // Navigate to Google Maps with the search query
     const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Wait a bit for dynamic content to load
+    await randomDelay(3000, 5000);
 
     // Handle cookie consent popup (non-fatal)
     try {
